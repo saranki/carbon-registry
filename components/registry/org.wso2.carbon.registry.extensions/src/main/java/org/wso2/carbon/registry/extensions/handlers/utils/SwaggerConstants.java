@@ -22,6 +22,7 @@ public class SwaggerConstants {
 	//Swagger key constants
 	public static final String SWAGGER_VERSION_12 = "1.2";
 	public static final String SWAGGER_VERSION_2 = "2.0";
+	public static final String SWAGGER_VERSION_3 = "3.0.0";
 
 	//common swagger constants
 	public static final String INFO = "info";
@@ -42,9 +43,12 @@ public class SwaggerConstants {
 
 	//swagger 2.0 constants
 	public static final String SWAGGER2_VERSION_KEY = "swagger";
+	public static final String SWAGGER3_VERSION_KEY = "openapi";
 	public static final String TITLE = "title";
 	public static final String PATH = "path";
 	public static final String SCHEMES = "schemes";
 	public static final String PATHS = "paths";
 	public static final String HOST = "host";
+	public static final String SERVERS = "servers";
+	public static final String URL = "url";
 }
