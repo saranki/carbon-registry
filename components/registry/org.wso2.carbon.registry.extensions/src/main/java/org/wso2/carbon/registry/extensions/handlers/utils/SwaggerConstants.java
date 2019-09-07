@@ -43,12 +43,19 @@ public class SwaggerConstants {
 
 	//swagger 2.0 constants
 	public static final String SWAGGER2_VERSION_KEY = "swagger";
-	public static final String SWAGGER3_VERSION_KEY = "openapi";
 	public static final String TITLE = "title";
 	public static final String PATH = "path";
 	public static final String SCHEMES = "schemes";
 	public static final String PATHS = "paths";
 	public static final String HOST = "host";
+
+	//swagger 3.0.0 constants
+	public static final String SWAGGER3_VERSION_KEY = "openapi";
 	public static final String SERVERS = "servers";
 	public static final String URL = "url";
+	public static final String VARIABLES = "variables";
+	public static final String OPEN_API_3_ALLOWED_VERSION = "3.0.?[0-2]$";
+	public static final String VARIABLE_KEYS = "\\{.*?[a-zA-Z]\\}";
+	public static final String ENUM = "enum";
+	public static final String DEFAULT = "default";
 }

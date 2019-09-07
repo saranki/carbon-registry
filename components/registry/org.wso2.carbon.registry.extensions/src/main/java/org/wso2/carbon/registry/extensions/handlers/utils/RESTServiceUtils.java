@@ -48,6 +48,10 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.io.StringReader;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static org.wso2.carbon.registry.extensions.handlers.utils.SwaggerProcessor.isValidOpenApiVersion;
 
 /**
  * This class contains static methods to generate REST Service registry artifact from the swagger doc added to the
@@ -81,6 +85,19 @@ public class RESTServiceUtils {
 	private static OMNamespace namespace = factory.createOMNamespace(CommonConstants.SERVICE_ELEMENT_NAMESPACE, "");
 	private static String commonRestServiceLocation;
 	private static String commonEndpointLocation;
+	private static SwaggerProcessor swaggerProcessor;
+
+	/**
+	 * Check if the given openapi version is in 3.0.x format
+	 *
+	 * @param swaggerVersion
+	 * @return
+	 */
+//	private static boolean isValidOpenApiVersion(String swaggerVersion) {
+//		Pattern openApi3Pattern = Pattern.compile(SwaggerConstants.OPEN_API_3_ALLOWED_VERSION);
+//		Matcher openApi3Version = openApi3Pattern.matcher(swaggerVersion);
+//		return openApi3Version.find();
+//	}
 
 	/**
 	 * Extracts the data from swagger and creates an REST Service registry artifact.
@@ -154,7 +171,7 @@ public class RESTServiceUtils {
 		return data;
 	}
 
-    /**
+	/**
      * Extracts the data from swagger and creates an REST Service registry artifact.
      * In 5.1.0 Please remove the above method
      *
@@ -184,7 +201,9 @@ public class RESTServiceUtils {
         OMElement endpoint = factory.createOMElement(ENDPOINT_URL, namespace);
         OMElement transports = factory.createOMElement(TRANSPORTS, namespace);
         OMElement description = factory.createOMElement(DESCRIPTION, namespace);
-        List<OMElement> uriTemplates = null;
+        // OMElement servers = factory.createOMElement(SwaggerConstants.SERVERS, namespace);
+
+		List<OMElement> uriTemplates = null;
 
         JsonObject infoObject = swaggerDocObject.get(SwaggerConstants.INFO).getAsJsonObject();
         //get api name.
@@ -197,14 +216,19 @@ public class RESTServiceUtils {
         //provider.setText(CarbonContext.getThreadLocalCarbonContext().getUsername());
         endpoint.setText(endpointURL);
 
-        if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion)) {
-            apiVersion.setText(documentVersion);
-            transports.setText(getChildElementText(swaggerDocObject, SwaggerConstants.SCHEMES));
-            uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
-        } else if (SwaggerConstants.SWAGGER_VERSION_12.equals(swaggerVersion)) {
-            apiVersion.setText(documentVersion);
-            uriTemplates = createURITemplateFromSwagger12(resourceObjects);
-        }
+        //openapi 3.0.X
+
+		if (isValidOpenApiVersion(swaggerVersion)) {
+			apiVersion.setText(getChildElementText(infoObject, SwaggerConstants.VERSION));
+			uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
+		} else if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion)) {
+			apiVersion.setText(documentVersion);
+			transports.setText(getChildElementText(swaggerDocObject, SwaggerConstants.SCHEMES));
+			uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
+		} else if (SwaggerConstants.SWAGGER_VERSION_12.equals(swaggerVersion)) {
+			apiVersion.setText(documentVersion);
+			uriTemplates = createURITemplateFromSwagger12(resourceObjects);
+		}
 
         //overview.addChild(provider);
         overview.addChild(name);
@@ -544,6 +568,7 @@ public class RESTServiceUtils {
 	 * @return          Element value
 	 */
 	private static String getChildElementText(JsonObject object, String key) {
+		log.info("Get child elememt as text");
 		JsonElement element = object.get(key);
 		if (element != null && element.isJsonArray()) {
 			if (((JsonArray) element).size() == 1) {
@@ -558,6 +583,7 @@ public class RESTServiceUtils {
 						sb.append(",");
 					}
 				}
+				log.info("sb return:--->"+sb.toString());
 				return sb.toString();
 			}
 		} else if (element != null && (element.isJsonObject() || element.isJsonPrimitive())) {
