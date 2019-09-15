@@ -46,12 +46,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -81,6 +77,7 @@ public class SwaggerProcessor {
 	private String swaggerResourcesPath;
 	private String documentVersion;
 	private String endpointUrl;
+	private List<String> urlList = new ArrayList<>();
 	private OMElement restServiceElement = null;
 	private OMElement endpointElement = null;
 	private String endpointLocation;
@@ -107,24 +104,25 @@ public class SwaggerProcessor {
 		this.createRestServiceArtifact = createRestServiceArtifact;
 	}
 
-
 	/**
 	 * Check if the given openapi version is in 3.0.x format
+	 *
 	 * @param swaggerVersion
 	 * @return
 	 */
-	public static boolean isValidOpenApiVersion(String swaggerVersion){
+	public static boolean isValidOpenApiVersion(String swaggerVersion) {
 		Pattern openApi3Pattern = Pattern.compile(SwaggerConstants.OPEN_API_3_ALLOWED_VERSION);
 		Matcher openApi3Version = openApi3Pattern.matcher(swaggerVersion);
 		return openApi3Version.find();
 	}
 
 	/**
-	 * get all the keys inside servers json object
+	 * Get all the keys in servers json object
+	 *
 	 * @param serverVariables
-	 * @return
+	 * @return List<String>
 	 */
-	private List<String> getAllKeys(JsonObject serverVariables) {
+	public static List<String> getAllKeys(JsonObject serverVariables) {
 		List<String> keyList = new ArrayList<>();
 		Set<Map.Entry<String, JsonElement>> entries = serverVariables.entrySet();
 		for (Map.Entry<String, JsonElement> entry : entries) {
@@ -134,38 +132,75 @@ public class SwaggerProcessor {
 	}
 
 	/**
-	 * Get the complete URL by assigning the variables
+	 * Get the pattern of variable in a given OpenAPI url
 	 *
-	 * @param variableObject
-	 * @param keyList
-	 * @param url
-	 * @return
+	 * @param key	The name of the variable
+	 * @return String
 	 */
-	private String getServerUrlEndpoint(JsonObject variableObject, List<String> keyList, String url) {
-		HashMap<String, String> urlComponents = new HashMap<>();
-		String value;
+	private String getPatternForVariableMapping(String key) {
+		return "{" + key + "}";
+	}
 
-		// Prepare the corresponding K-V pair
+	/**
+	 * For each of the variable keys in the servers object, get the enum values and replace them in the original
+	 * url and create a list of proper urls
+	 * Eg: "url": "{scheme}://developer.gov/{base}"
+	 *
+	 * @param variableObject 	The object that contains the variables to be replaced in the url
+	 * @param keyList 			The list of keys in the variable object
+	 * @param initialUrl		The url to be replaced
+	 * @return List<String>
+	 */
+	private List<String> getServerUrlEndpoint(JsonObject variableObject, List<String> keyList, String initialUrl) {
+		// CopyOnWriteArrayList is used here because the same ulr list is being updated
+		List<String> replacedUrlList = new CopyOnWriteArrayList<>();
+		String replacedUrl;
+
+		// To iterate through the list of keys (mapping variable) in the given url
 		for (String key : keyList) {
-			JsonElement variableKey = variableObject.get(key);
-			JsonObject variableEnumObject = variableKey.getAsJsonObject();
-			JsonArray variableEnum = variableEnumObject.get(SwaggerConstants.ENUM).getAsJsonArray();
-			value = (variableEnum.size() != 0) ? variableEnum.get(0).getAsString() : variableEnumObject.get(SwaggerConstants.DEFAULT).getAsString();
-			urlComponents.put(key, value);
-		}
+			String pattern = getPatternForVariableMapping(key);
+			JsonObject keyObject = variableObject.get(key).getAsJsonObject();
 
-		// Replace the url variables with the actual values
-		for (String component : urlComponents.keySet()) {
-			String prefix = "\\{";
-			String suffix = "\\}";
-			Pattern keyWordPattern = Pattern.compile(prefix + Pattern.quote(component) + suffix);
-			Matcher keyWord;
-			keyWord = keyWordPattern.matcher(url);
-			if (keyWord.find()) {
-				url = url.replace((prefix + component + suffix).replace("\\", ""), urlComponents.get(component));
+			JsonArray enumValues = keyObject.has(SwaggerConstants.ENUM) ? keyObject.get(SwaggerConstants.ENUM).getAsJsonArray() : null;
+			String defaultValue = null;
+
+			// Check if the enum array is empty
+			if ((enumValues == null) || (enumValues.size() == 0)) {
+				// If empty assign the default value
+				defaultValue = keyObject.get(SwaggerConstants.DEFAULT).getAsString();
+			}
+
+			// Check if it's the 1st iteration and the url has the pattern and add to the list
+			if (replacedUrlList.isEmpty() && initialUrl.contains(pattern)) {
+				if (defaultValue != null) {
+					replacedUrl = initialUrl.replace(pattern, defaultValue);
+					replacedUrlList.add(replacedUrl);
+				} else {
+					for (JsonElement value : enumValues) {
+						replacedUrl = initialUrl.replace(pattern, value.getAsString());
+						replacedUrlList.add(replacedUrl);
+					}
+				}
+			} else {
+				for (String existingUrl : replacedUrlList) {
+					if (existingUrl.contains(pattern)) {
+						if (defaultValue != null) {
+							replacedUrl = existingUrl.replace(pattern, defaultValue);
+							replacedUrlList.remove(existingUrl);
+							replacedUrlList.add(replacedUrl);
+						} else {
+							for (JsonElement value : enumValues) {
+								replacedUrl = existingUrl.replace(pattern, value.getAsString());
+								replacedUrlList.remove(existingUrl);
+								replacedUrlList.add(replacedUrl);
+							}
+						}
+
+					}
+				}
 			}
 		}
-		return url;
+		return replacedUrlList;
 	}
 
 	/**
@@ -205,21 +240,34 @@ public class SwaggerProcessor {
 				if (isCreateRestServiceArtifact()) {
 					restServiceElement = (resourceObjects != null)
 							? RESTServiceUtils.createRestServiceArtifact(swaggerDocObject, swaggerVersion, endpointUrl,
-									resourceObjects, swaggerResourcePath, documentVersion)
+							resourceObjects, swaggerResourcePath, documentVersion)
 							: null;
 				}
 			} else {
 				return null;
 			}
 
-		} else if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion) || isValidOpenApiVersion(swaggerVersion)) {
+		} else if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion)) {
 			if (addSwaggerDocumentToRegistry(swaggerContentStream, swaggerResourcePath, documentVersion)) {
 				createEndpointElement(swaggerDocObject, swaggerVersion);
 				if (isCreateRestServiceArtifact()) {
-					restServiceElement = RESTServiceUtils.createRestServiceArtifact(swaggerDocObject, swaggerVersion,
-							endpointUrl, null, swaggerResourcePath, documentVersion);
+					restServiceElement = RESTServiceUtils
+							.createRestServiceArtifact(swaggerDocObject, swaggerVersion, endpointUrl, null,
+									swaggerResourcePath, documentVersion);
+				}
+			} else {
+				return null;
+			}
+
+		} else if (isValidOpenApiVersion(swaggerVersion)) {
+			if (addSwaggerDocumentToRegistry(swaggerContentStream, swaggerResourcePath, documentVersion)) {
+				List<String> urls = createEndpointElementList(swaggerDocObject);
+				if (isCreateRestServiceArtifact()) {
+					restServiceElement = RESTServiceUtils.createRestServiceArtifactForOpenApi(swaggerDocObject, urls, swaggerResourcePath, documentVersion);
+
 				} else {
-					log.warn("Failed to create Rest Service Artifact for "  +  endpointUrl + " with Document Version " + documentVersion);
+					log.warn("Failed to create Rest Service Artifact with Document Version " + documentVersion);
+
 				}
 			} else {
 				log.warn("Failed to Add Swagger Document to Registry. Unsupported Swagger Version: " + swaggerVersion);
@@ -236,7 +284,11 @@ public class SwaggerProcessor {
 				String servicePath = RESTServiceUtils.addServiceToRegistry(requestContext, restServiceElement);
 				registry.addAssociation(servicePath, swaggerResourcePath, CommonConstants.DEPENDS);
 				registry.addAssociation(swaggerResourcePath, servicePath, CommonConstants.USED_BY);
-				saveEndpointElement(servicePath);
+
+				if (isValidOpenApiVersion(swaggerVersion)) {
+					saveEndpointElementList(servicePath, urlList);
+				} else
+					saveEndpointElement(servicePath);
 			} else {
 				log.warn("Service content is null. Cannot create the REST Service artifact.");
 			}
@@ -263,6 +315,25 @@ public class SwaggerProcessor {
 	}
 
 	/**
+	 * Save endpoint elements to the registry
+	 *
+	 * @param servicePath
+	 * @param urlList
+	 * @throws RegistryException
+	 */
+	public void saveEndpointElementList(String servicePath, List<String> urlList) throws RegistryException {
+
+		for(String url : urlList){
+			String endpointPath;
+			if (StringUtils.isNotBlank(url)) {
+				EndpointUtils.addEndpointToService(requestContext.getRegistry(), servicePath, url, "");
+				endpointPath = RESTServiceUtils.addEndpointToRegistry(requestContext, endpointElement, endpointLocation);
+				CommonUtil.addDependency(registry, servicePath, endpointPath);
+			}
+		}
+	}
+
+	/**
 	 * Saves a swagger document in the registry.
 	 *
 	 * @param contentStream   resource content.
@@ -271,7 +342,7 @@ public class SwaggerProcessor {
 	 * @throws RegistryException If fails to add the swagger document to registry.
 	 */
 	private boolean addSwaggerDocumentToRegistry(ByteArrayOutputStream contentStream, String path,
-			String documentVersion) throws RegistryException {
+												 String documentVersion) throws RegistryException {
 		Resource resource;
 		/*
 		 * Checks if a resource is already exists in the given path. If exists, Compare
@@ -340,7 +411,7 @@ public class SwaggerProcessor {
 	 *                           registry.
 	 */
 	private List<JsonObject> addResourceDocsToRegistry(JsonObject swaggerDocObject, String sourceUrl,
-			String swaggerDocPath) throws RegistryException {
+													   String swaggerDocPath) throws RegistryException {
 
 		if (sourceUrl == null) {
 			log.debug(CommonConstants.EMPTY_URL);
@@ -441,42 +512,7 @@ public class SwaggerProcessor {
 
 			endpointUrl = transport + host + basePath;
 
-		} else if (isValidOpenApiVersion(swaggerVersion)) {
-			// Handle Swagger OpenAPI 3.0.x extractions
-			if (swaggerObject.has(SwaggerConstants.SERVERS)) {
-				JsonElement serversElement = swaggerObject.get(SwaggerConstants.SERVERS);
-				JsonArray servers = serversElement.getAsJsonArray();
-
-				// case 2: servers:[]
-				if (servers.size() != 0) {
-					// Get the first url from the array of servers
-					JsonObject serverObject = servers.get(0).getAsJsonObject();
-					String url = serverObject.get(SwaggerConstants.URL).toString();
-
-					// case 3: url: {}, <key1>, <key2>, ...
-					if (serverObject.has(SwaggerConstants.VARIABLES)) {
-						JsonObject variablesObject = serverObject.get(SwaggerConstants.VARIABLES).getAsJsonObject();
-						List<String> keyList = getAllKeys(variablesObject);
-						endpointUrl = getServerUrlEndpoint(variablesObject, keyList, url);
-					} else {
-						//case 1
-						endpointUrl = url;
-					}
-					//case 4: no server tag
-				} else {
-					// If the servers property is not provided, or is an empty array, the default value would be a
-					// Server Object with a url value of "/"
-					// endpointUrl = "\\";
-					log.info("Server doesn't contain any url information. Empty array. ");
-					return;
-				}
-
-			} else {
-				log.info("Server component doesn't exist for the swagger content provided. ");
-				return;
-			}
 		}
-
 		/*
 		 * Creating endpoint artifact changed
 		 */
@@ -486,6 +522,7 @@ public class SwaggerProcessor {
 		// CHANGED: the location name
 		String endpointName = EndpointUtils.deriveEndpointNameWithNamespaceFromUrl(endpointUrl).replaceAll("\"", "");
 		String endpointContent = EndpointUtils.getEndpointContentWithOverview(endpointUrl, endpointLocation, endpointName, documentVersion);
+
 		try {
 			endpointElement = AXIOMUtil.stringToOM(factory, endpointContent);
 		} catch (XMLStreamException e) {
@@ -494,8 +531,79 @@ public class SwaggerProcessor {
 
 	}
 
-	private void handleEmptyArrayForServersKey() {
+	/**
+	 *
+	 * Generate endpoint url list for a given OpenAPI 3.0.x version with different cases for "servers" element
+	 *
+	 * @param swaggerObject
+	 * @return List<String>
+	 * @throws RegistryException
+	 */
+	private List<String> createEndpointElementList(JsonObject swaggerObject) throws RegistryException {
+		if (swaggerObject.has(SwaggerConstants.SERVERS)) {
+			JsonElement serversElement = swaggerObject.get(SwaggerConstants.SERVERS);
+			JsonArray servers = serversElement.getAsJsonArray();
+			int serversObjectSize = servers.size();
 
+			if (serversObjectSize > 0) {
+				for(int i=0; i<serversObjectSize; i++){
+					JsonObject serverObject = servers.get(i).getAsJsonObject();
+					String url = serverObject.get(SwaggerConstants.URL).toString().replace("\"", "");
+
+					// case 3: url: {}, <key1>, <key2>, ...
+					if (serverObject.has(SwaggerConstants.VARIABLES)) {
+						JsonObject variablesObject = serverObject.get(SwaggerConstants.VARIABLES).getAsJsonObject();
+						List<String> keyList = getAllKeys(variablesObject);
+						List<String> serverUrlEndpointsList = getServerUrlEndpoint(variablesObject, keyList, url);
+
+						for(String serverUrl : serverUrlEndpointsList){
+							urlList.add(serverUrl);
+						}
+					} else {
+						//case 1
+						endpointUrl = url;
+						urlList.add(endpointUrl);
+					}
+
+				}
+				// case 2: servers:[]
+			} else {
+				// If the servers property is not provided, or is an empty array, the default value would be a
+				// Server Object with a url value of "/"
+				endpointUrl = SwaggerConstants.DEFAULT_URL;
+
+			}
+			//case 4: no server tag
+		} else {
+			endpointUrl = SwaggerConstants.DEFAULT_URL;
+		}
+
+
+		/*
+		 * Creating endpoint artifact changed
+		 */
+		for(String urlValue : urlList){
+			OMFactory factory = OMAbstractFactory.getOMFactory();
+			endpointLocation =EndpointUtils.deriveEndpointFromUrl(urlValue);
+
+			// CHANGED: the location name
+			String endpointName = EndpointUtils.deriveEndpointNameWithNamespaceFromUrl(urlValue).replaceAll("\"", "");
+			String endpointContent = EndpointUtils.getEndpointContentWithOverview(urlValue, endpointLocation, endpointName, documentVersion);
+			try
+
+			{
+				endpointElement = AXIOMUtil.stringToOM(factory, endpointContent);
+			} catch(
+					XMLStreamException e)
+
+			{
+				throw new RegistryException("Error in creating the endpoint element. ", e);
+			}
+		}
+		return urlList;
+	}
+
+	private void handleEmptyArrayForServersKey() {
 	}
 
 	/**
@@ -587,7 +695,6 @@ public class SwaggerProcessor {
 						swaggerVersionElement = swaggerDocObject.get(SwaggerConstants.SWAGGER3_VERSION_KEY);
 				}
 		}
-
 		if (swaggerVersionElement == null) {
 			log.info("Swagger version: " + swaggerVersionElement);
 			throw new RegistryException("Unsupported swagger version.");

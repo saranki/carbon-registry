@@ -18,11 +18,9 @@ package org.wso2.carbon.registry.extensions.handlers.utils;
 
 public class SwaggerConstants {
 
-
 	//Swagger key constants
 	public static final String SWAGGER_VERSION_12 = "1.2";
 	public static final String SWAGGER_VERSION_2 = "2.0";
-	public static final String SWAGGER_VERSION_3 = "3.0.0";
 
 	//common swagger constants
 	public static final String INFO = "info";
@@ -40,7 +38,6 @@ public class SwaggerConstants {
 	public static final String TYPE = "type";
 	public static final String METHOD = "method";
 
-
 	//swagger 2.0 constants
 	public static final String SWAGGER2_VERSION_KEY = "swagger";
 	public static final String TITLE = "title";
@@ -49,13 +46,15 @@ public class SwaggerConstants {
 	public static final String PATHS = "paths";
 	public static final String HOST = "host";
 
-	//swagger 3.0.0 constants
+	//swagger 3.0.x constants
 	public static final String SWAGGER3_VERSION_KEY = "openapi";
 	public static final String SERVERS = "servers";
 	public static final String URL = "url";
 	public static final String VARIABLES = "variables";
 	public static final String OPEN_API_3_ALLOWED_VERSION = "3.0.?[0-2]$";
-	public static final String VARIABLE_KEYS = "\\{.*?[a-zA-Z]\\}";
 	public static final String ENUM = "enum";
 	public static final String DEFAULT = "default";
+	public static final String DEFAULT_URL = "\"/\"";
+	public static final String SCHEME = "scheme";
+
 }

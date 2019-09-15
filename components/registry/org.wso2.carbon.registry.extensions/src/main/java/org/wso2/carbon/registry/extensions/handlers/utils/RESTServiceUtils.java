@@ -48,10 +48,6 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.io.StringReader;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import static org.wso2.carbon.registry.extensions.handlers.utils.SwaggerProcessor.isValidOpenApiVersion;
 
 /**
  * This class contains static methods to generate REST Service registry artifact from the swagger doc added to the
@@ -86,18 +82,6 @@ public class RESTServiceUtils {
 	private static String commonRestServiceLocation;
 	private static String commonEndpointLocation;
 	private static SwaggerProcessor swaggerProcessor;
-
-	/**
-	 * Check if the given openapi version is in 3.0.x format
-	 *
-	 * @param swaggerVersion
-	 * @return
-	 */
-//	private static boolean isValidOpenApiVersion(String swaggerVersion) {
-//		Pattern openApi3Pattern = Pattern.compile(SwaggerConstants.OPEN_API_3_ALLOWED_VERSION);
-//		Matcher openApi3Version = openApi3Pattern.matcher(swaggerVersion);
-//		return openApi3Version.find();
-//	}
 
 	/**
 	 * Extracts the data from swagger and creates an REST Service registry artifact.
@@ -201,8 +185,6 @@ public class RESTServiceUtils {
         OMElement endpoint = factory.createOMElement(ENDPOINT_URL, namespace);
         OMElement transports = factory.createOMElement(TRANSPORTS, namespace);
         OMElement description = factory.createOMElement(DESCRIPTION, namespace);
-        // OMElement servers = factory.createOMElement(SwaggerConstants.SERVERS, namespace);
-
 		List<OMElement> uriTemplates = null;
 
         JsonObject infoObject = swaggerDocObject.get(SwaggerConstants.INFO).getAsJsonObject();
@@ -214,14 +196,10 @@ public class RESTServiceUtils {
         description.setText(getChildElementText(infoObject, SwaggerConstants.DESCRIPTION));
         //get api provider. (Current logged in user) : Alternative - CurrentSession.getUser();
         //provider.setText(CarbonContext.getThreadLocalCarbonContext().getUsername());
-        endpoint.setText(endpointURL);
+		endpointURL = endpointURL.replace("\"","");
+		endpoint.setText(endpointURL);
 
-        //openapi 3.0.X
-
-		if (isValidOpenApiVersion(swaggerVersion)) {
-			apiVersion.setText(getChildElementText(infoObject, SwaggerConstants.VERSION));
-			uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
-		} else if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion)) {
+		if (SwaggerConstants.SWAGGER_VERSION_2.equals(swaggerVersion)) {
 			apiVersion.setText(documentVersion);
 			transports.setText(getChildElementText(swaggerDocObject, SwaggerConstants.SCHEMES));
 			uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
@@ -243,15 +221,108 @@ public class RESTServiceUtils {
         swagger.setText(swaggerPath);
         interfaceElement.addChild(swagger);
 		interfaceElement.addChild(transports);
+
         data.addChild(interfaceElement);
+
         if (uriTemplates != null) {
             for (OMElement uriTemplate : uriTemplates) {
                 data.addChild(uriTemplate);
             }
         }
-
         return data;
     }
+
+	/**
+	 *
+	 * Rest service artifact for the OpenAPI 3.0.x specification created with corresponding UI elements
+	 *
+	 * @param swaggerDocObject
+	 * @param endpointURLList
+	 * @param swaggerPath
+	 * @param documentVersion
+	 * @return OMElement
+	 * @throws RegistryException
+	 */
+	public static OMElement createRestServiceArtifactForOpenApi(JsonObject swaggerDocObject,List<String> endpointURLList, String swaggerPath, String documentVersion)
+			throws RegistryException {
+
+		if(swaggerDocObject == null) {
+			throw new IllegalArgumentException("Arguments are invalid. cannot create the REST service artifact. ");
+		}
+
+		OMElement data = factory.createOMElement(CommonConstants.SERVICE_ELEMENT_ROOT, namespace);
+		OMElement overview = factory.createOMElement(OVERVIEW, namespace);
+		OMElement name = factory.createOMElement(NAME, namespace);
+		OMElement context = factory.createOMElement(CONTEXT, namespace);
+		OMElement apiVersion = factory.createOMElement(VERSION, namespace);
+		OMElement endpoint = factory.createOMElement(ENDPOINT_URL, namespace);
+		OMElement transports = factory.createOMElement(TRANSPORTS, namespace);
+		OMElement description = factory.createOMElement(DESCRIPTION, namespace);
+		List<OMElement> uriTemplates = null;
+
+		JsonObject infoObject = swaggerDocObject.get(SwaggerConstants.INFO).getAsJsonObject();
+		String apiName = getChildElementText(infoObject, SwaggerConstants.TITLE).replaceAll("\\s", "");
+		name.setText(apiName);
+		context.setText("/" + apiName);
+		description.setText(getChildElementText(infoObject, SwaggerConstants.DESCRIPTION));
+
+		apiVersion.setText(documentVersion);
+
+		if(swaggerDocObject.has(SwaggerConstants.SERVERS)) {
+			JsonElement serversElement = swaggerDocObject.get(SwaggerConstants.SERVERS);
+			JsonArray serversArray = serversElement.getAsJsonArray();
+			int serverArraySize = serversArray.size();
+			JsonObject serverObject, variableObject, schemeObject;
+			String url, transport;
+
+			if (serverArraySize > 0) {
+				StringBuffer sbTransport = new StringBuffer();
+				for (int i = 0; i < serverArraySize; i++) {
+					serverObject = serversArray.get(i).getAsJsonObject();
+					url = serverObject.get(SwaggerConstants.URL).toString();
+
+					transport = url.split(":")[0].replace("\"","");
+					sbTransport.append(transport);
+					if (i < serverArraySize - 1) {
+						sbTransport.append(",");
+					}
+					transports.setText(sbTransport.toString());
+
+					if (serverObject.has(SwaggerConstants.VARIABLES)) {
+
+						variableObject = serverObject.get(SwaggerConstants.VARIABLES).getAsJsonObject();
+						schemeObject = variableObject.get(SwaggerConstants.SCHEME).getAsJsonObject();
+						transports.setText(getChildElementText(schemeObject, SwaggerConstants.ENUM));
+					}
+				}
+			}
+		}
+		uriTemplates = createURITemplateFromSwagger2(swaggerDocObject);
+		overview.addChild(name);
+		overview.addChild(context);
+		overview.addChild(apiVersion);
+		overview.addChild(description);
+
+		for(String endpointURL : endpointURLList){
+			endpoint.setText(endpointURL);
+			overview.addChild(endpoint);
+		}
+		data.addChild(overview);
+
+		OMElement interfaceElement = factory.createOMElement(INTERFACE, namespace);
+		OMElement swagger = factory.createOMElement(SWAGGER, namespace);
+		swagger.setText(swaggerPath);
+		interfaceElement.addChild(swagger);
+		interfaceElement.addChild(transports);
+		data.addChild(interfaceElement);
+
+		if (uriTemplates != null) {
+			for (OMElement uriTemplate : uriTemplates) {
+				data.addChild(uriTemplate);
+			}
+		}
+		return data;
+	}
 
 	/**
 	 * Extracts the data from wadl and creates an REST Service registry artifact.
@@ -568,7 +639,6 @@ public class RESTServiceUtils {
 	 * @return          Element value
 	 */
 	private static String getChildElementText(JsonObject object, String key) {
-		log.info("Get child elememt as text");
 		JsonElement element = object.get(key);
 		if (element != null && element.isJsonArray()) {
 			if (((JsonArray) element).size() == 1) {
@@ -583,7 +653,6 @@ public class RESTServiceUtils {
 						sb.append(",");
 					}
 				}
-				log.info("sb return:--->"+sb.toString());
 				return sb.toString();
 			}
 		} else if (element != null && (element.isJsonObject() || element.isJsonPrimitive())) {
